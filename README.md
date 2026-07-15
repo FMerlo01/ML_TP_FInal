@@ -98,6 +98,189 @@ Se probaron regresión logística y Random Forest. Con hiperparámetros por defe
 
 **Modelo elegido: Random Forest tuneado** (`n_estimators=200, max_depth=16, min_samples_leaf=5`), por una ligera ventaja sobre la regresión logística tuneada en el resultado final de test. La regresión logística queda como alternativa más simple e interpretable para la Parte 5.
 
+---
+
+## Actualización: validación OOF, análisis de errores y cohortes
+
+> **Nota:** esta sección agrega el trabajo realizado posteriormente y debe leerse como una actualización del apartado **Estado actual**. No se modificó el contenido anterior del README.
+
+### Aclaración metodológica
+
+La elección del modelo **no utilizó el conjunto de test**. La comparación y selección entre la regresión logística y el Random Forest se realizó mediante validación cruzada sobre el conjunto de entrenamiento.
+
+El conjunto de test continúa reservado para una única evaluación final. Por lo tanto, cualquier mención anterior a que el modelo fue elegido por su resultado en test debe considerarse desactualizada.
+
+### Trabajo agregado al notebook
+
+Se incorporaron las siguientes etapas al pipeline:
+
+1. Evaluación out-of-fold de los modelos tuneados.
+2. Comparación mediante métricas tradicionales y métricas de ranking.
+3. Matriz de confusión del Random Forest tuneado.
+4. Análisis de falsos positivos y falsos negativos.
+5. Análisis de los errores de mayor confianza.
+6. Análisis de rendimiento por cohortes.
+7. Análisis del comportamiento del top 1000 del ranking.
+8. Interpretación del Random Forest mediante importancia de variables.
+
+Las predicciones out-of-fold permiten analizar los errores sin utilizar test y sin evaluar cada observación con un modelo que haya sido entrenado con esa misma observación.
+
+### Comparación de modelos tuneados
+
+| Modelo | Accuracy | Precision | Recall | F1 | ROC-AUC | PR-AUC | Precision@1000 | Recall@1000 | Lift@1000 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Regresión logística | 0.832 | 0.722 | 0.581 | 0.644 | 0.889 | 0.760 | 0.961 | 0.205 | 3.683 |
+| Random Forest | **0.848** | **0.796** | 0.559 | **0.657** | **0.904** | **0.804** | **0.997** | **0.213** | **3.821** |
+
+El Random Forest tuneado presenta el mejor desempeño global y de ranking. La regresión logística alcanza un recall ligeramente mayor con umbral 0.5, pero el Random Forest logra mejor precision, F1, ROC-AUC, PR-AUC y rendimiento dentro del top 1000.
+
+### Interpretación del ranking
+
+La `Precision@1000` del Random Forest fue **0.997**. Esto significa que, entre los 1000 casos con mayor riesgo estimado, aproximadamente **997 pertenecen realmente a la clase positiva**.
+
+El `Recall@1000` fue **0.213**, por lo que esos 1000 casos concentran aproximadamente el **21.3% de todos los positivos** disponibles en la validación out-of-fold.
+
+El `Lift@1000` fue **3.821**. La precision del top 1000 es, por lo tanto, aproximadamente **3.8 veces mayor que la que se obtendría seleccionando casos al azar**.
+
+Esto indica que el modelo es especialmente útil como herramienta de priorización cuando la cantidad de auditorías disponibles es limitada. No debe interpretarse como un sistema capaz de detectar la totalidad de los casos positivos.
+
+### Matriz de confusión OOF del Random Forest
+
+Con un umbral de 0.5 se obtuvieron:
+
+- 12.588 verdaderos negativos;
+- 2.619 verdaderos positivos;
+- 672 falsos positivos;
+- 2.062 falsos negativos.
+
+El modelo obtiene una precision alta, pero deja sin detectar una proporción relevante de los positivos. Esto es consistente con su uso como ranking de priorización y no como decisión automática.
+
+### Análisis de falsos positivos
+
+Los falsos positivos se concentran principalmente en perfiles asociados por el modelo con la clase positiva: personas casadas, con educación alta y con ocupaciones profesionales o gerenciales.
+
+Hallazgos principales:
+
+- El **98.8%** de los falsos positivos pertenece a `Married-civ-spouse`.
+- `Prof-specialty` representa el **37.1%** de los falsos positivos.
+- `Exec-managerial` representa el **29.6%**.
+- La tasa de falsos positivos fue **0.261** para personas con posgrado.
+- La tasa de falsos positivos fue **0.154** para personas con grado universitario.
+- Por ocupación, las mayores FPR aparecen en `Prof-specialty` (**0.176**), `Exec-managerial` (**0.158**) y `Tech-support` (**0.133**).
+- La categoría laboral `Self-emp-inc` presenta una FPR de **0.215**.
+
+Estos errores podrían producir auditorías innecesarias sobre personas con perfiles similares a los de la clase positiva. La predicción debe utilizarse únicamente para ordenar revisiones posteriores realizadas por personas.
+
+### Análisis de falsos negativos
+
+Los falsos negativos presentan menor educación y valores mucho menores de `capital_gain` que los verdaderos positivos.
+
+- `education_num` promedio de falsos negativos: **10.59**.
+- `education_num` promedio de verdaderos positivos: **12.46**.
+- `capital_gain` promedio de falsos negativos: **226.21**.
+- `capital_gain` promedio de verdaderos positivos: **8896.63**.
+
+Las mayores tasas de falsos negativos por ocupación fueron:
+
+| Ocupación | FNR |
+|---|---:|
+| `Handlers-cleaners` | 0.831 |
+| `Other-service` | 0.829 |
+| `Machine-op-inspct` | 0.745 |
+| `Farming-fishing` | 0.713 |
+| `Transport-moving` | 0.710 |
+
+También se observó:
+
+- FNR de **0.716** en personas de hasta 25 años.
+- FNR de **0.788** en personas con secundario incompleto.
+- FNR de **0.664** en casos sin datos laborales.
+
+El modelo tiene dificultades para detectar positivos que no muestran los indicadores económicos, educativos o laborales más comunes de la clase positiva. En una aplicación real deberían mantenerse mecanismos alternativos de selección para no excluir sistemáticamente estos casos.
+
+### Análisis por cohortes
+
+#### Sexo
+
+| Cohorte | Recall | FPR | FNR | Tasa de selección top 1000 | Prevalencia positiva |
+|---|---:|---:|---:|---:|---:|
+| Mujeres | 0.497 | 0.020 | 0.503 | 0.012 | 0.138 |
+| Hombres | 0.574 | 0.072 | 0.426 | 0.080 | 0.328 |
+
+El modelo deja sin detectar una proporción mayor de positivos entre las mujeres. Los hombres, por otro lado, presentan una tasa mayor de falsos positivos y son seleccionados con mucha mayor frecuencia dentro del top 1000.
+
+Parte de esta diferencia se relaciona con la distinta prevalencia de la clase positiva en el dataset, aunque el comportamiento debería monitorearse en una implementación real.
+
+#### Edad
+
+La mayor tasa de falsos negativos aparece en personas de hasta 25 años (**0.716**), seguida por el grupo de 26 a 35 años (**0.543**).
+
+Las bandas de 36 a 45 y de 46 a 55 años son seleccionadas con mayor frecuencia en el top 1000, con tasas de **8.5%** y **9.6%**, respectivamente.
+
+#### Educación
+
+La tasa de selección dentro del top 1000 aumenta fuertemente con el nivel educativo:
+
+- Secundario incompleto: **0.2%**.
+- Secundario completo: **2.5%**.
+- Grado universitario: **11.2%**.
+- Posgrado: **19.0%**.
+
+Este comportamiento coincide parcialmente con las diferencias de prevalencia entre las cohortes, pero también muestra que el ranking depende considerablemente de la educación.
+
+### Importancia de variables
+
+Las variables con mayor importancia agregada en el Random Forest fueron:
+
+| Variable | Importancia |
+|---|---:|
+| `capital_gain` | 0.239 |
+| `marital_status` | 0.194 |
+| `relationship` | 0.146 |
+| `education_num` | 0.145 |
+| `occupation` | 0.082 |
+| `age` | 0.070 |
+| `capital_loss` | 0.069 |
+
+Entre las categorías individuales más utilizadas aparecen `Married-civ-spouse`, `Husband`, `Never-married`, `Wife`, `Prof-specialty` y `Exec-managerial`.
+
+Estas importancias representan asociaciones predictivas dentro del dataset. No demuestran causalidad ni deberían utilizarse individualmente para justificar una auditoría.
+
+### Estado del proyecto después de esta actualización
+
+Completado adicionalmente:
+
+- evaluación OOF de los modelos tuneados;
+- comparación mediante ROC-AUC, PR-AUC, F1 y métricas del ranking;
+- análisis de la matriz de confusión;
+- análisis de falsos positivos y falsos negativos;
+- análisis de errores de alta confianza;
+- análisis por cohortes;
+- análisis del top 1000;
+- interpretación mediante importancia de variables;
+- conclusiones técnicas de la Parte 3.
+
+### Trabajo pendiente para continuar
+
+El siguiente integrante debería continuar con:
+
+1. Revisar las conclusiones del análisis de errores y cohortes.
+2. Realizar una única evaluación final sobre el conjunto de test.
+3. Reportar las métricas finales sin volver a modificar el modelo a partir de esos resultados.
+4. Desarrollar la Parte 4 de la consigna:
+   - llegada de nuevos datos;
+   - consumidor de la predicción;
+   - forma de despliegue;
+   - variables y métricas a monitorear;
+   - detección de data drift y concept drift;
+   - criterio de reentrenamiento;
+   - riesgos éticos, legales, sociales y prácticos.
+5. Desarrollar la Parte 5 en lenguaje no técnico.
+6. Preparar la presentación técnica de 10 minutos.
+7. Preparar la presentación no técnica de 5 minutos.
+
+La evaluación final sobre test debe realizarse una sola vez. Si el resultado de test es peor de lo esperado, debe reportarse y analizarse, pero no utilizarse para volver a seleccionar hiperparámetros o cambiar el modelo.
+
 ## Referencias
 
 - Consigna del TP y dataset: ver carpeta del curso.
