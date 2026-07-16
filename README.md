@@ -25,7 +25,7 @@ Dentro del notebook:
 2. Seleccionar el kernel **`Python (tp-arca)`** desde el selector de Jupyter.
 3. `Restart & Run All`.
 
-Dependencias: `pandas`, `numpy`, `matplotlib`, `seaborn`, `scipy`, `scikit-learn`, `ipykernel`.
+Dependencias: `pandas`, `numpy`, `matplotlib`, `seaborn`, `scipy`, `scikit-learn`, `ipykernel`, `joblib`.
 
 ## Estructura del repo
 
@@ -33,6 +33,10 @@ Dependencias: `pandas`, `numpy`, `matplotlib`, `seaborn`, `scipy`, `scikit-learn
 .
 ├── README.md
 ├── adult.csv               # dataset original (sin header)
+├── extra-data.csv          # lote externo etiquetado para simulación de producción
+├── model_serving.py        # validación, persistencia e inferencia standalone
+├── artifacts/
+│   └── random_forest_income.joblib  # pipeline completo ya entrenado
 └── tp_final_arca.ipynb     # notebook con todo el pipeline
 ```
 
@@ -49,7 +53,9 @@ Completado (Parte 3 de la consigna):
 7. Métricas de negocio a medida del caso de uso.
 8. Búsqueda de hiperparámetros (`RandomizedSearchCV`, scoring múltiple).
 
-Pendiente: Análisis de errores y cohortes en validation, test y métricas. Luego partes 4 y 5.
+También están completados el análisis de errores y cohortes, la evaluación final
+sobre test, la Parte 4, la inferencia standalone y la simulación de monitoreo y
+reentrenamiento con datos externos. Quedan la Parte 5 y las presentaciones.
 
 ## Decisiones de diseño importantes
 
@@ -96,7 +102,7 @@ Además de accuracy/precision/recall/F1/ROC-AUC, se definieron dos métricas pen
 
 Se probaron regresión logística y Random Forest. Con hiperparámetros por defecto (evaluados por CV), la regresión logística superaba al Random Forest — señal de que el RF sin tunear sobreajustaba sobre el espacio disperso de las variables one-hot. Se tunearon ambos con `RandomizedSearchCV` (scoring múltiple: ROC-AUC como criterio principal, más las métricas de negocio a modo diagnóstico), y ahí el Random Forest pasó a competir de igual a igual.
 
-**Modelo elegido: Random Forest tuneado** (`n_estimators=200, max_depth=16, min_samples_leaf=5`), por una ligera ventaja sobre la regresión logística tuneada en el resultado final de test. La regresión logística queda como alternativa más simple e interpretable para la Parte 5.
+**Modelo elegido: Random Forest tuneado** (`n_estimators=200, max_depth=16, min_samples_leaf=5`), por su ventaja en la validación OOF realizada exclusivamente sobre train. La regresión logística queda como alternativa más simple e interpretable para la Parte 5.
 
 ---
 
@@ -108,7 +114,8 @@ Se probaron regresión logística y Random Forest. Con hiperparámetros por defe
 
 La elección del modelo **no utilizó el conjunto de test**. La comparación y selección entre la regresión logística y el Random Forest se realizó mediante validación cruzada sobre el conjunto de entrenamiento.
 
-El conjunto de test continúa reservado para una única evaluación final. Por lo tanto, cualquier mención anterior a que el modelo fue elegido por su resultado en test debe considerarse desactualizada.
+El conjunto de test fue utilizado una única vez para la evaluación final y no se
+empleó para modificar el modelo, sus hiperparámetros ni el umbral.
 
 ### Trabajo agregado al notebook
 
@@ -262,24 +269,44 @@ Completado adicionalmente:
 
 ### Trabajo pendiente para continuar
 
-El siguiente integrante debería continuar con:
+1. Desarrollar la Parte 5 en lenguaje no técnico.
+2. Preparar la presentación técnica de 10 minutos.
+3. Preparar la presentación no técnica de 5 minutos.
 
-1. Revisar las conclusiones del análisis de errores y cohortes.
-2. Realizar una única evaluación final sobre el conjunto de test.
-3. Reportar las métricas finales sin volver a modificar el modelo a partir de esos resultados.
-4. Desarrollar la Parte 4 de la consigna:
-   - llegada de nuevos datos;
-   - consumidor de la predicción;
-   - forma de despliegue;
-   - variables y métricas a monitorear;
-   - detección de data drift y concept drift;
-   - criterio de reentrenamiento;
-   - riesgos éticos, legales, sociales y prácticos.
-5. Desarrollar la Parte 5 en lenguaje no técnico.
-6. Preparar la presentación técnica de 10 minutos.
-7. Preparar la presentación no técnica de 5 minutos.
+## Inferencia sobre datos nuevos
 
-La evaluación final sobre test debe realizarse una sola vez. Si el resultado de test es peor de lo esperado, debe reportarse y analizarse, pero no utilizarse para volver a seleccionar hiperparámetros o cambiar el modelo.
+El artefacto contiene el pipeline completo ya ajustado. Por lo tanto, no hay que
+recrear manualmente el one-hot encoding ni el escalado:
+
+```python
+from model_serving import predict_one
+
+row = [
+    47, "Private", 120939, "Some-college", 10,
+    "Married-civ-spouse", "Tech-support", "Husband",
+    "White", "Male", 0, 0, 45, "United-States",
+]
+
+probability = predict_one(row)
+print(probability)  # 0.535945 aproximadamente
+```
+
+También se puede usar `predict_rows()` con un diccionario o un `DataFrame`. El
+modelo estima `income >50K`; el umbral de decisión 0.5 es configurable y es
+distinto del umbral de ingresos que define el target.
+
+## Simulación con datos externos
+
+`extra-data.csv` se divide de forma estratificada en 50% adaptación, 25%
+validation y 25% test. El desarrollo V2 combina todos los datos históricos con
+adaptación y usa K-fold para comparar reentrenamiento base y ponderación de
+cohortes mediante accuracy, precision, recall, F1, ROC-AUC y PR-AUC.
+
+Validation compara el productivo y los candidatos sobre las mismas 4.070 filas.
+El reentrenado base mejoró ROC-AUC solo 0.001 y redujo recall y F1, por lo que no
+cumplió la regla de promoción y se mantuvo el productivo. Test evaluó únicamente
+ese modelo ya seleccionado sobre 4.071 filas; sus resultados no participaron de
+la decisión.
 
 ## Referencias
 
